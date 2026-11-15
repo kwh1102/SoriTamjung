@@ -16,6 +16,12 @@ export function loadSave():Save { try{return sanitize(JSON.parse(localStorage.ge
 export function storeSave(s:Save):boolean {try{localStorage.setItem(SAVE_KEY,JSON.stringify(s));return true;}catch{return false;} }
 export function unlocked(s:Save,room:RoomId) {return room==='lobby'||room==='instruments'||(room==='rhythm'&&s.instrument===3)||(room==='hall'&&s.rhythm===2);}
 export function progress(s:Save) {return Math.round((s.instrument+s.rhythm+(s.completed?1:0))/6*100);}
+export function recordPuzzleCompletion(s:Save,kind:'instrument'|'rhythm',index:number){
+  const total=kind==='instrument'?3:2;
+  if(!Number.isInteger(index)||index<0||index>=total)return;
+  // Replays use their own cursor; saved restoration can only advance, up to its cap.
+  s[kind]=Math.max(s[kind],index+1);
+}
 export function canOccupy(x:number,z:number,s:Pick<Save,'instrument'|'rhythm'>):boolean {
   const r=.28;
   if(Math.abs(x)>12-r||Math.abs(z)>9-r)return false;

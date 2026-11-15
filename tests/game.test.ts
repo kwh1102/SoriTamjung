@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {canOccupy,defaults,progress,sanitize,unlocked} from '../src/state.ts';
+import {canOccupy,defaults,progress,recordPuzzleCompletion,sanitize,unlocked} from '../src/state.ts';
 import {instruments,instrumentPuzzles,rhythmPuzzles,semachi} from '../src/data.ts';
 import {readFileSync,existsSync} from 'node:fs';
 test('corrupt and out-of-order saves cannot unlock later rooms',()=>{
@@ -13,6 +13,29 @@ test('sequential progress unlocks rhythm, hall and full restoration',()=>{
   s.instrument=3;assert.equal(unlocked(s,'rhythm'),true);assert.equal(unlocked(s,'hall'),false);
   s.rhythm=2;assert.equal(unlocked(s,'hall'),true);assert.equal(progress(s),83);
   s.completed=true;assert.equal(progress(s),100);assert.equal(sanitize(s).completed,true);
+});
+test('replaying completed puzzles preserves 100 percent, unlocked rooms and preferences',()=>{
+  const s={...defaults,instrument:3,rhythm:2,completed:true,started:true,volume:.4,speed:4};
+  const before={...s};
+  for(let round=0;round<4;round++){
+    for(let i=0;i<3;i++)recordPuzzleCompletion(s,'instrument',i);
+    for(let i=0;i<2;i++)recordPuzzleCompletion(s,'rhythm',i);
+  }
+  assert.deepEqual(s,before);assert.equal(progress(s),100);
+  assert.equal(unlocked(s,'rhythm'),true);assert.equal(unlocked(s,'hall'),true);
+  assert.deepEqual(sanitize(s),s);
+});
+test('retrying the same solved question cannot skip an unsolved question',()=>{
+  const s={...defaults};
+  recordPuzzleCompletion(s,'instrument',0);recordPuzzleCompletion(s,'instrument',0);
+  assert.equal(s.instrument,1);assert.equal(unlocked(s,'rhythm'),false);
+  recordPuzzleCompletion(s,'instrument',1);recordPuzzleCompletion(s,'instrument',2);
+  recordPuzzleCompletion(s,'rhythm',0);recordPuzzleCompletion(s,'rhythm',0);
+  assert.equal(s.rhythm,1);assert.equal(unlocked(s,'hall'),false);
+  recordPuzzleCompletion(s,'rhythm',1);assert.equal(unlocked(s,'hall'),true);
+  assert.equal(s.completed,false);
+  for(const i of [-1,3,NaN,1.5])recordPuzzleCompletion(s,'instrument',i);
+  assert.equal(s.instrument,3);
 });
 test('exterior, partitions, locked passages and plinths collide; doors stay passable',()=>{
   assert.equal(canOccupy(12,0,defaults),false);assert.equal(canOccupy(-4,0,defaults),false);

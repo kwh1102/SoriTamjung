@@ -3,7 +3,7 @@ import {renderShell} from './shell';
 import {createElement,ArrowUpRight,ArrowRight,AudioLines,BookOpen,Check,ChevronRight,Compass,DoorOpen,Drum,Headphones,HelpCircle,Home,Info,Keyboard,Lock,Map,Maximize,Menu,Music2,Pause,Play,RotateCcw,Settings2,Share2,Sparkles,Volume2,VolumeX,X} from 'lucide';
 import {instruments,instrumentPuzzles,referenceLinks,rhythmPuzzles,rooms,semachi,strokes} from './data';
 import type {InstrumentId,RoomId,Stroke} from './data';
-import {defaults,loadSave,progress,storeSave,unlocked} from './state';
+import {defaults,loadSave,progress,recordPuzzleCompletion,storeSave,unlocked} from './state';
 import {SoundEngine} from './audio';
 import {Museum} from './museum';
 
@@ -16,6 +16,7 @@ function instrumentDrawing(id:string){
 const state=loadSave();const sound=new SoundEngine();sound.volume=state.volume;sound.muted=state.muted;
 const $=<T extends HTMLElement=HTMLElement>(selector:string)=>document.querySelector<T>(selector)!;
 const app=$('#app');let museum:Museum|null=null;let playing=false;let currentModal='';let priorFocus:HTMLElement|null=null;let lastFocus:HTMLElement|null=null;
+let instrumentIndex=0;let rhythmIndex=0;let replayingInstruments=false;let replayingRhythm=false;
 let instrumentSelection:InstrumentId|null=null;let instrumentHint=0;let rhythmHint=0;let feedback='';let solved=false;let selectedStroke:Stroke='deong';let board:(Stroke|null)[]=[];let repeat=false;let activeAudio='';let toastTimer:ReturnType<typeof setTimeout>;
 function safe(value:unknown){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!));}
 function save(){if(!storeSave(state))toast('이 브라우저에서 저장할 수 없어요. 현재 창에서는 계속 진행할 수 있습니다.');updateUI();}
@@ -29,9 +30,9 @@ function syncExploration(){
   $('#entry').hidden=playing;$('#game-hud').hidden=!playing;$('#playbar').hidden=!playing;
   if(!playing)return;
   const room=state.room;$('#room-label').textContent=rooms.find(r=>r.id===room)!.name;
-  const target=state.completed?null:museum?.target;
+  const target=state.completed&&museum?.target==='lobby'?null:museum?.target;
   $('#investigate').hidden=!target;$('#guide-action').hidden=!!target;
-  if(target)$('#investigate span').textContent=target==='lobby'?'사건 살펴보기':target==='hall'?'공연장 살펴보기':'소리 조사하기';
+  if(target)$('#investigate span').textContent=target==='lobby'?'사건 살펴보기':target==='hall'?(state.completed?'복원 결과 보기':'공연장 살펴보기'):target==='instruments'&&state.instrument===3?'악기 퍼즐 다시 풀기':target==='rhythm'&&state.rhythm===2?'장단 퍼즐 다시 풀기':'소리 조사하기';
   const destination=room==='lobby'&&!state.instrument?'lobby':nextRoom();$('#guide-label').textContent=state.completed?'복원 결과 보기':room===destination?'조사 위치로 이동':rooms.find(r=>r.id===destination)!.name+'으로 이동';
   $('#objective-mini-text').textContent=state.completed?'모든 소리를 되찾았습니다.':room==='lobby'&&!state.instrument?'앞의 빛나는 표식을 조사하세요.':state.instrument<3?'악기의 방에서 사라진 소리를 찾으세요.':state.rhythm<2?'장단의 방에서 빈 소박을 채우세요.':'공연장에서 되찾은 소리를 들어보세요.';
 }
@@ -57,17 +58,17 @@ function travel(room:RoomId){if(!unlocked(state,room)){toast(room==='rhythm'?'�
 }
 function openRoom(id:RoomId){if(!unlocked(state,id))return;feedback='';solved=false;sound.stop();activeAudio='';
   if(id==='lobby')setDialog('lobby','박물관의 소리가 사라졌어요','사건 001','<p class="dialog-lead">고장 난 소리 보관 장치.<br>악기의 음색과 장단이 흩어졌습니다.</p><p class="learning-copy">먼저 악기의 방으로 가세요. 소리를 비교하면 사라진 악기를 찾을 수 있어요.</p><div class="modal-actions"><button class="text-button" data-action="sound-test">소리 확인</button><button class="primary" data-action="travel" data-room="instruments">악기의 방으로'+icon('arrow')+'</button></div>');
-  if(id==='instruments'){instrumentSelection=null;instrumentHint=0;heardFull=false;heardMissing=false;state.instrument===3?showCollection():showInstrument();}
-  if(id==='rhythm'){rhythmHint=0;rhythmHeard=false;if(state.rhythm===2)showRhythmReview();else{prepareBoard();showRhythm();}}
-  if(id==='hall')showHall();
+  if(id==='instruments'){replayingInstruments=state.instrument===instrumentPuzzles.length;instrumentIndex=replayingInstruments?0:state.instrument;instrumentSelection=null;instrumentHint=0;heardFull=false;heardMissing=false;showInstrument();}
+  if(id==='rhythm'){replayingRhythm=state.rhythm===rhythmPuzzles.length;rhythmIndex=replayingRhythm?0:state.rhythm;rhythmHint=0;rhythmHeard=false;prepareBoard();showRhythm();}
+  if(id==='hall')state.completed?showResults():showHall();
 }
 function soundButton(action:string,label:string,kind:string,cls='secondary'){return `<button class="${cls} audio-button" data-action="${action}" data-kind="${kind}" aria-pressed="false">${icon('play')} ${label}</button>`;}
 let heardFull=false;let heardMissing=false;
-function showInstrument(index=Math.min(state.instrument,2)){
+function showInstrument(index=instrumentIndex){
   const p=instrumentPuzzles[index];const answer=instruments.find(i=>i.id===p.answer)!;
   if(solved){
     setDialog('instrument',answer.name+'의 소리를 되찾았어요', '악기의 방 · '+(index+1)+' / 3',
-      '<div class="found-instrument">'+instrumentDrawing(answer.id)+'</div><p class="dialog-lead">'+answer.feature+'</p><p class="learning-copy">'+answer.description+'</p><div class="listen-row">'+soundButton('restore-listen','복원 후 듣기','restored')+soundButton('instrument-listen','복원 전 듣기','missing')+'</div><div class="modal-actions"><button class="text-button" data-action="stop">소리 정지</button><button class="primary" data-action="instrument-next">'+(state.instrument===3?'장단의 방으로':'다음 소리 찾기')+icon('arrow')+'</button></div>','puzzle-modal');return;
+      '<div class="found-instrument">'+instrumentDrawing(answer.id)+'</div><p class="dialog-lead">'+answer.feature+'</p><p class="learning-copy">'+answer.description+'</p><div class="listen-row">'+soundButton('restore-listen','복원 후 듣기','restored')+soundButton('instrument-listen','복원 전 듣기','missing')+'</div><div class="modal-actions"><button class="text-button" data-action="retry-current">이 문제 다시 풀기</button><button class="primary" data-action="instrument-next">'+(index===instrumentPuzzles.length-1?(replayingInstruments?'다시 풀기 완료':'장단의 방으로'):'다음 소리 찾기')+icon('arrow')+'</button></div>','puzzle-modal');return;
   }
   const heard=heardFull&&(p.mode==='solo'||heardMissing);
   const listening='<div class="listen-row">'+soundButton('instrument-listen',p.mode==='solo'?'단서 소리 듣기':'완성된 합주 듣기','full',!heardFull?'listen-tile recommended':'listen-tile')+(p.mode==='ensemble'?soundButton('instrument-listen','악기가 빠진 예시 듣기','missing',heardFull&&!heardMissing?'listen-tile recommended':'listen-tile'):'')+'</div>';
@@ -83,13 +84,13 @@ function showInstrument(index=Math.min(state.instrument,2)){
 let justSolvedInstrument=-1;
 function showInstrumentAtSolved(){showInstrument(justSolvedInstrument);}
 
-function prepareBoard(){const p=rhythmPuzzles[state.rhythm];board=semachi.map((s,i)=>p.blanks.includes(i)?null:s);selectedStroke='deong';}
+function prepareBoard(){const p=rhythmPuzzles[rhythmIndex];board=semachi.map((s,i)=>p.blanks.includes(i)?null:s);selectedStroke='deong';}
 let justSolvedRhythm=-1;
 let rhythmHeard=false;
-function showRhythm(index=Math.min(state.rhythm,1)){
+function showRhythm(index=rhythmIndex){
   const p=rhythmPuzzles[index];
   if(solved){setDialog('rhythm','장단이 다시 이어졌어요','장단의 방 · '+(index+1)+' / 2',
-    '<p class="dialog-lead">내가 채운 소박이 전체 흐름에 돌아왔어요.</p><div class="pattern-summary">덩 · · <span>/</span> 덩 · 덕 <span>/</span> 쿵 덕 ·</div><p class="learning-copy">세마치는 3소박씩 세 박이 모인 장단입니다. 이번에는 그중 한 가지 예시를 복원했어요.</p>'+soundButton('rhythm-listen','채운 부분을 강조해 듣기','restored')+'<div class="modal-actions"><button class="text-button" data-action="stop">소리 정지</button><button class="primary" data-action="rhythm-next">'+(state.rhythm===2?'공연장으로':'다음 장단 찾기')+icon('arrow')+'</button></div>','puzzle-modal');return;}
+    '<p class="dialog-lead">내가 채운 소박이 전체 흐름에 돌아왔어요.</p><div class="pattern-summary">덩 · · <span>/</span> 덩 · 덕 <span>/</span> 쿵 덕 ·</div><p class="learning-copy">세마치는 3소박씩 세 박이 모인 장단입니다. 이번에는 그중 한 가지 예시를 복원했어요.</p>'+soundButton('rhythm-listen','채운 부분을 강조해 듣기','restored')+'<div class="modal-actions"><button class="text-button" data-action="retry-current">이 문제 다시 풀기</button><button class="primary" data-action="rhythm-next">'+(index===rhythmPuzzles.length-1?(replayingRhythm?'다시 풀기 완료':'공연장으로'):'다음 장단 찾기')+icon('arrow')+'</button></div>','puzzle-modal');return;}
   const explanation='<p class="dialog-lead compact">'+(rhythmHeard?'소리 블록을 고른 뒤, 빈칸을 눌러 채워주세요.':'먼저 세마치장단 예시를 들어보세요.')+'</p>';
   const listen='<div class="listen-row">'+soundButton('rhythm-listen','기준 예시 듣기','reference',rhythmHeard?'listen-tile':'listen-tile recommended')+(rhythmHeard?soundButton('rhythm-listen','내 배치 듣기','board','listen-tile'):'')+'</div>';
   const grid=rhythmHeard?'<div class="board-heading"><h3>한 칸은 1소박이에요.</h3><span>3소박 × 3박</span></div><div class="beat-groups">'+[0,1,2].map(beat=>'<div class="beat-group"><span>'+(beat+1)+'박</span><div>'+board.slice(beat*3,beat*3+3).map((stroke,j)=>{const i=beat*3+j,editable=p.blanks.includes(i);return '<button class="beat-cell '+(editable?'editable':'')+' '+(stroke?'filled':'empty')+'" data-action="place-stroke" data-index="'+i+'" data-beat="'+i+'" '+(!editable?'disabled':'')+' aria-label="'+(i+1)+'번째 소박, '+(stroke?strokes.find(a=>a.id===stroke)!.label:'빈칸')+', '+(editable?'편집 가능':'고정')+'"><span>'+(stroke?strokes.find(a=>a.id===stroke)!.label:'?')+'</span></button>';}).join('')+'</div></div>').join('')+'</div><div class="stroke-palette" aria-label="넣을 소리 선택">'+strokes.map(a=>'<button draggable="true" data-stroke="'+a.id+'" class="stroke-block '+(selectedStroke===a.id?'selected':'')+'" data-action="select-stroke" data-id="'+a.id+'" aria-pressed="'+(selectedStroke===a.id)+'"><strong>'+a.label+'</strong><small>'+a.description+'</small></button>').join('')+'</div><details class="puzzle-tools"><summary>반복 듣기와 초기화</summary><div><label class="checkbox"><input id="repeat-rhythm" type="checkbox" '+(repeat?'checked':'')+'/>4번 반복</label><button class="text-button" data-action="reset-board">배치 초기화</button><button class="text-button" data-action="stop">소리 정지</button></div></details>':'';
@@ -99,8 +100,20 @@ function showRhythm(index=Math.min(state.rhythm,1)){
 
 function showRhythmAtSolved(){showRhythm(justSolvedRhythm);}
 function showRhythmReview(){setDialog('rhythm-review','다시 이어진 장단의 흐름','장단의 방 · 복원 완료',`<div class="completion-symbol">${icon('drum')}</div><p class="dialog-lead">세마치장단의 빈칸을 모두 되찾았어요.</p><div class="pattern-summary">덩 · · <span>/</span> 덩 · 덕 <span>/</span> 쿵 덕 ·</div><p class="notice">점(·)은 쉬는 소박입니다. 3소박씩 세 묶음이 한 장단을 이룹니다. 이 패턴이 세마치의 유일한 연주 형태는 아닙니다.</p><div class="modal-actions">${soundButton('rhythm-review-listen','장단 다시 듣기','reference')}<button class="primary" data-action="travel" data-room="hall">공연장으로 ${icon('arrow')}</button></div>`);}
+function showReplayMenu(message='복원 기록과 열린 전시실은 그대로 유지됩니다.'){
+  setDialog('replay','퍼즐 다시 풀기','재도전','<p class="dialog-lead compact">'+message+'</p><nav class="room-list">'+
+    (state.instrument===instrumentPuzzles.length?'<button data-action="replay-room" data-room="instruments"><span><strong>악기 퍼즐 다시 풀기</strong><small>단음과 합주 · 3문제</small></span>'+icon('arrow')+'</button>':'')+
+    (state.rhythm===rhythmPuzzles.length?'<button data-action="replay-room" data-room="rhythm"><span><strong>장단 퍼즐 다시 풀기</strong><small>세마치장단 복원 · 2문제</small></span>'+icon('arrow')+'</button>':'')+
+    '</nav><div class="modal-actions"><button class="text-button" data-action="reset-confirm">기록을 지우고 처음부터</button><button class="secondary" data-action="close">탐험으로</button></div>');
+}
+function retryCurrent(){
+  const kind=currentModal;if(!solved||(kind!=='instrument'&&kind!=='rhythm'))return;
+  sound.stop();activeAudio='';solved=false;feedback='';
+  if(kind==='instrument'){instrumentIndex=justSolvedInstrument;instrumentSelection=null;instrumentHint=0;heardFull=false;heardMissing=false;showInstrument();}
+  else{rhythmIndex=justSolvedRhythm;rhythmHint=0;rhythmHeard=false;prepareBoard();showRhythm();}
+}
 function showHall(){setDialog('hall','당신이 되찾은 소리의 무대','공연장',`<div class="concert-art"><span>♪</span><span>♬</span><span>♫</span></div><p class="dialog-lead">가야금의 울림, 대금의 숨결, 해금의 활.<br>그리고 다시 이어진 장구의 장단을 만나 보세요.</p><div class="notice">국립국악원의 단음 녹음을 악기별로 차례로 들은 뒤, 복원한 장단으로 마무리하는 약 10초의 작은 소리 전시입니다. 전통 악곡의 완성 연주 녹음은 아닙니다.</div><div class="modal-actions">${soundButton('performance','작은 소리 공연 듣기','performance','primary')}<button class="secondary" data-action="finish">발견의 기록 보기 ${icon('arrow')}</button></div>`);}
-function showResults(){setDialog('results','박물관의 모든 소리가 돌아왔어요','RESTORATION COMPLETE',`<div class="result-seal">${icon('sparkles')}<span>복원 완료</span></div><p class="dialog-lead">당신이 귀 기울인 순간들이 모여<br>박물관을 다시 음악으로 채웠습니다.</p><div class="review-cards"><div><span>01 음색</span><h3>같은 높이, 다른 소리</h3><p>가야금·대금·해금의 실제 소리를 비교하고, 합주에서 빠진 악기를 찾았어요.</p></div><div><span>02 장단</span><h3>반복 속에 담긴 흐름</h3><p>3소박씩 세 박이 모인 세마치 예시의 빈칸을 직접 복원했어요.</p></div><div><span>03 연결</span><h3>내가 채운 소리의 자리</h3><p>복원 전후를 비교하며 작은 요소가 전체 소리에 미치는 변화를 들었어요.</p></div></div><div class="modal-actions"><button class="secondary" data-action="collection">${icon('book')} 소리 도감</button><button class="primary" data-action="performance">${icon('play')} 다시 감상하기</button></div><div class="result-links"><button data-action="sources">참고 자료와 자산 출처</button><button data-action="reset-confirm">처음부터 다시 플레이</button></div>`);}
+function showResults(){setDialog('results','박물관의 모든 소리가 돌아왔어요','RESTORATION COMPLETE',`<div class="result-seal">${icon('sparkles')}<span>복원 완료</span></div><p class="dialog-lead">당신이 귀 기울인 순간들이 모여<br>박물관을 다시 음악으로 채웠습니다.</p><div class="review-cards"><div><span>01 음색</span><h3>같은 높이, 다른 소리</h3><p>가야금·대금·해금의 실제 소리를 비교하고, 합주에서 빠진 악기를 찾았어요.</p></div><div><span>02 장단</span><h3>반복 속에 담긴 흐름</h3><p>3소박씩 세 박이 모인 세마치 예시의 빈칸을 직접 복원했어요.</p></div><div><span>03 연결</span><h3>내가 채운 소리의 자리</h3><p>복원 전후를 비교하며 작은 요소가 전체 소리에 미치는 변화를 들었어요.</p></div></div><div class="modal-actions"><button class="secondary" data-action="performance">${icon('play')} 다시 감상하기</button><button class="primary" data-action="replay-menu">${icon('reset')} 퍼즐 다시 풀기</button></div><div class="result-links"><button data-action="sources">참고 자료와 자산 출처</button><button data-action="reset-confirm">처음부터 다시 플레이</button></div>`);}
 function showCollection(){setDialog('collection','귀로 만나는 작은 소리 도감','SOUND COLLECTION',`<p class="dialog-lead compact">같은 높이의 실제 녹음 단음을 번갈아 들어보세요.</p><div class="collection-list">${instruments.map(i=>`<article><span class="collection-icon" style="color:${i.color}">${icon('music')}</span><div><h3>${i.name} <small>${i.family}</small></h3><p>${i.description}</p></div><button class="icon-button" data-action="sample" data-id="${i.id}" aria-label="${i.name} 듣기">${icon('volume')}</button></article>`).join('')}</div><div class="notice">‘맑다’, ‘거칠다’ 같은 느낌은 개인의 감상입니다. 이 체험은 소리를 만드는 방법과 울림의 차이를 비교해 보는 활동이에요.</div><div class="modal-actions"><button class="text-button" data-action="sources">${icon('book')} 자세한 출처</button><button class="primary" data-action="${state.instrument===3?'travel':'close'}" ${state.instrument===3?'data-room="rhythm"':''}>${state.instrument===3?'장단의 방으로':'탐험으로 돌아가기'} ${icon('arrow')}</button></div>`);}
 function showSettings(){setDialog('settings','편안한 탐험을 위한 설정','PREFERENCES',`<button class="secondary mute-setting" data-action="mute">${icon(state.muted?'mute':'volume')} 소리 ${state.muted?'켜기':'끄기'}</button><div class="settings-list"><label><span>${icon('volume')} 전체 음량 <b id="volume-label">${Math.round(state.volume*100)}%</b></span><input id="volume" type="range" min="0" max="100" value="${state.volume*100}"/></label><label><span>${icon('compass')} 이동 속도 <b id="speed-label">${state.speed.toFixed(1)}</b></span><input id="speed" type="range" min="1.5" max="5" step=".1" value="${state.speed}"/></label><label><span>${icon('settings')} 시점 감도 <b id="sensitivity-label">${state.sensitivity.toFixed(1)}</b></span><input id="sensitivity" type="range" min=".3" max="2.5" step=".1" value="${state.sensitivity}"/></label></div><p class="notice">설정은 자동으로 저장됩니다. 이동이 어려우면 메뉴의 전시실 이동을 이용하세요.</p><div class="modal-actions"><button class="text-button danger" data-action="reset-confirm">${icon('reset')} 처음부터 시작</button><button class="primary" data-action="close">설정 완료 ${icon('check')}</button></div>`);}
 function showHelp(){setDialog('help','소리탐정의 작은 안내서','HOW TO PLAY',`<div class="help-grid"><article><h3>${icon('keyboard')} PC에서</h3><p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 또는 방향키로 이동<br>화면을 누른 채 드래그하여 둘러보기<br><kbd>E</kbd> 또는 빛나는 표식 가까이에서 클릭하여 조사<br><kbd>Esc</kbd> 퍼즐 닫기 · 잠시 쉬기</p></article><article><h3>${icon('compass')} 휴대폰·태블릿에서</h3><p>왼쪽 아래 조이스틱으로 이동<br>오른쪽 화면을 드래그하여 둘러보기<br>가까이 다가가 ‘조사하기’ 버튼 누르기<br>장단은 블록 선택 후 빈칸을 눌러 채우기</p></article></div><div class="notice"><strong>내 속도로, 편하게.</strong><br>시간제한이나 탈락은 없어요. 예시를 여러 번 듣고 단계별 힌트를 사용해 보세요. 메뉴의 전시실 이동을 누르면 해당 전시물 가까이로 이동해요. 잠긴 공간에는 해제 조건이 표시됩니다.</div><div class="modal-actions"><button class="secondary" data-action="sound-test">${icon('volume')} 소리 확인</button><button class="primary" data-action="close">이제 알겠어요 ${icon('check')}</button></div>`);}
@@ -108,7 +121,7 @@ async function showSources(){setDialog('sources','소리의 출처, 제작의 �
   try{const res=await fetch(`${import.meta.env.BASE_URL}audio/manifest.json`);const data=await res.json();if(currentModal!=='sources')return;const items=data.items??data.assets??data;$('#asset-credits').innerHTML=items.map((a:Record<string,unknown>)=>`<article class="asset-credit"><div><strong>${safe(a.name??a.id)}</strong><span>${safe(a.author)} · ${safe(a.license)}</span></div><p>${safe(a.modifications)}</p><a href="${safe(a.sourceUrl)}" target="_blank" rel="noopener noreferrer">원자료 보기 ${icon('diagonal')}</a></article>`).join('');}catch{if(currentModal==='sources')$('#asset-credits').textContent='출처 목록을 불러오지 못했어요. 저장소의 docs/audio-research.md를 확인해 주세요.';}
 }
 function showPause(){setDialog('pause','메뉴',rooms.find(r=>r.id===state.room)!.name,
-  '<button class="primary resume-button" data-action="close">'+icon('play')+'탐험 계속하기</button><div class="menu-progress"><span>박물관 복원</span><strong>'+progress(state)+'%</strong><div><i style="width:'+progress(state)+'%"></i></div></div><div class="menu-links"><button data-action="map">전시실 이동'+icon('chevron')+'</button><button data-action="collection">소리 도감'+icon('chevron')+'</button><button data-action="settings">소리와 조작 설정'+icon('chevron')+'</button><button data-action="help">조작 방법'+icon('chevron')+'</button><button data-action="share">접속 링크 공유'+icon('chevron')+'</button><button data-action="sources">소개와 출처'+icon('chevron')+'</button></div>','menu-modal');}
+  '<button class="primary resume-button" data-action="close">'+icon('play')+'탐험 계속하기</button>'+((state.instrument===3||state.rhythm===2)?'<button class="secondary resume-button" data-action="replay-menu">퍼즐 다시 풀기</button>':'')+'<div class="menu-progress"><span>박물관 복원</span><strong>'+progress(state)+'%</strong><div><i style="width:'+progress(state)+'%"></i></div></div><div class="menu-links"><button data-action="map">전시실 이동'+icon('chevron')+'</button><button data-action="collection">소리 도감'+icon('chevron')+'</button><button data-action="settings">소리와 조작 설정'+icon('chevron')+'</button><button data-action="help">조작 방법'+icon('chevron')+'</button><button data-action="share">접속 링크 공유'+icon('chevron')+'</button><button data-action="sources">소개와 출처'+icon('chevron')+'</button></div>','menu-modal');}
 function showMap(){setDialog('map','전시실로 이동','이동 보조',
   '<p class="dialog-lead compact">가고 싶은 전시실을 선택하세요.</p><nav class="room-list">'+rooms.map((r,i)=>'<button data-action="travel" data-room="'+r.id+'" aria-disabled="'+!unlocked(state,r.id)+'"><span class="room-index">0'+(i+1)+'</span><span><strong>'+r.name+'</strong>'+(!unlocked(state,r.id)?'<small>'+(r.id==='rhythm'?'악기 문제 3개를 먼저 해결해 주세요.':'장단 문제 2개를 먼저 해결해 주세요.')+'</small>':'')+'</span>'+icon(unlocked(state,r.id)?'arrow':'lock')+'</button>').join('')+'</nav><button class="text-button" data-action="pause">메뉴로 돌아가기</button>');}
 
@@ -119,6 +132,9 @@ async function handle(action:string,el:HTMLElement){
   const data=el.dataset;
   switch(action){
     case 'start':await start();break;
+    case 'retry-current':retryCurrent();break;
+    case 'replay-menu':showReplayMenu();break;
+    case 'replay-room':{const room=data.room as RoomId;if((room==='instruments'&&state.instrument===3)||(room==='rhythm'&&state.rhythm===2)){travel(room);openRoom(room);}break;}
     case 'home':if(currentModal)closeDialog();if(playing)travel('lobby');else window.scrollTo({top:0,behavior:'smooth'});break;
     case 'travel':travel(data.room as RoomId);break;
     case 'next':if(state.completed){showResults();break;}travel(state.instrument<3?'instruments':state.rhythm<2?'rhythm':'hall');break;
@@ -136,19 +152,19 @@ async function handle(action:string,el:HTMLElement){
     case 'sound-test':await sound.solo('gayageum');toast(sound.ready?'가야금 소리가 들리나요? 설정에서 음량을 조절할 수 있어요.':sound.status);break;
     case 'select-instrument':if(solved)break;instrumentSelection=data.id as InstrumentId;feedback='';showInstrument();activeAudio='';await sound.solo(instrumentSelection);break;
     case 'sample':await sound.solo(data.id as InstrumentId);activeAudio='';if(!sound.ready)toast(sound.status);break;
-    case 'instrument-listen':{if(data.kind==='full')heardFull=true;else heardMissing=true;if(!solved)showInstrument();const p=instrumentPuzzles[solved?justSolvedInstrument:state.instrument];await playWithButton(`instrument-${data.kind}`,()=>p.mode==='solo'&&data.kind==='full'?sound.solo(p.answer):sound.ensemble(data.kind==='missing'?p.answer:undefined));break;}
-    case 'instrument-hint':instrumentHint=Math.min(3,instrumentHint+1);showInstrument();if(instrumentHint===2){activeAudio='';await sound.solo(instrumentPuzzles[state.instrument].answer);}break;
-    case 'verify-instrument':{const p=instrumentPuzzles[state.instrument];if(!instrumentSelection)break;if(instrumentSelection!==p.answer){feedback=`${instruments.find(i=>i.id===instrumentSelection)!.name} 소리와는 조금 달라요. 단서를 다시 듣고, 소리의 시작과 길이를 비교해 보세요.`;showInstrument();}else{solved=true;justSolvedInstrument=state.instrument;state.instrument++;feedback=`${instruments.find(i=>i.id===p.answer)!.name}의 소리를 되찾았어요! 복원한 악기를 먼저 듣고 전체 합주로 이어집니다.`;save();showInstrumentAtSolved();activeAudio="restored";await sound.restored(p.answer);}break;}
+    case 'instrument-listen':{if(data.kind==='full')heardFull=true;else heardMissing=true;if(!solved)showInstrument();const p=instrumentPuzzles[solved?justSolvedInstrument:instrumentIndex];await playWithButton(`instrument-${data.kind}`,()=>p.mode==='solo'&&data.kind==='full'?sound.solo(p.answer):sound.ensemble(data.kind==='missing'?p.answer:undefined));break;}
+    case 'instrument-hint':instrumentHint=Math.min(3,instrumentHint+1);showInstrument();if(instrumentHint===2){activeAudio='';await sound.solo(instrumentPuzzles[instrumentIndex].answer);}break;
+    case 'verify-instrument':{const p=instrumentPuzzles[instrumentIndex];if(!instrumentSelection)break;if(instrumentSelection!==p.answer){feedback=`${instruments.find(i=>i.id===instrumentSelection)!.name} 소리와는 조금 달라요. 단서를 다시 듣고, 소리의 시작과 길이를 비교해 보세요.`;showInstrument();}else{solved=true;justSolvedInstrument=instrumentIndex;recordPuzzleCompletion(state,'instrument',instrumentIndex);feedback=`${instruments.find(i=>i.id===p.answer)!.name}의 소리를 되찾았어요! 복원한 악기를 먼저 듣고 전체 합주로 이어집니다.`;save();showInstrumentAtSolved();activeAudio="restored";await sound.restored(p.answer);}break;}
     case 'restore-listen':activeAudio='restored';await sound.restored(instrumentPuzzles[justSolvedInstrument].answer);break;
-    case 'instrument-next':sound.stop();activeAudio='';solved=false;feedback='';instrumentSelection=null;instrumentHint=0;heardFull=false;heardMissing=false;if(state.instrument===3)travel('rhythm');else showInstrument();break;
+    case 'instrument-next':sound.stop();activeAudio='';solved=false;feedback='';instrumentSelection=null;instrumentHint=0;heardFull=false;heardMissing=false;instrumentIndex++;if(instrumentIndex===instrumentPuzzles.length){if(replayingInstruments)showReplayMenu('악기 문제 3개를 다시 풀었어요.');else travel('rhythm');}else showInstrument();break;
     case 'select-stroke':selectedStroke=data.id as Stroke;activeAudio='';refreshSolved();await sound.solo(selectedStroke);break;
     case 'stroke-sample':activeAudio='';await sound.solo(data.id as Stroke);break;
     case 'place-stroke':if(!solved){sound.stop();board[Number(data.index)]=selectedStroke;feedback='';showRhythm();}break;
-    case 'rhythm-listen':{rhythmHeard=true;if(!solved)showRhythm();const index=solved?justSolvedRhythm:state.rhythm;await playWithButton(`rhythm-${data.kind}`,()=>sound.rhythm(data.kind==='board'?board:semachi,repeat,data.kind==='restored'?rhythmPuzzles[index].blanks:[]));break;}
+    case 'rhythm-listen':{rhythmHeard=true;if(!solved)showRhythm();const index=solved?justSolvedRhythm:rhythmIndex;await playWithButton(`rhythm-${data.kind}`,()=>sound.rhythm(data.kind==='board'?board:semachi,repeat,data.kind==='restored'?rhythmPuzzles[index].blanks:[]));break;}
     case 'reset-board':if(!solved){sound.stop();prepareBoard();feedback='';showRhythm();}break;
-    case 'rhythm-hint':rhythmHint=Math.min(3,rhythmHint+1);showRhythm();if(rhythmHint===2){activeAudio='rhythm-reference';await sound.rhythm(semachi,false,rhythmPuzzles[state.rhythm].blanks);}break;
-    case 'verify-rhythm':{const wrong=board.map((s,i)=>s!==semachi[i]?i+1:0).filter(Boolean);if(wrong.length){feedback=`${wrong.join('・')}번째 소박이 기준과 다르게 들려요. 그 구간의 ‘덩·쿵·덕·쉼’을 다시 비교해 보세요.`;showRhythm();}else{justSolvedRhythm=state.rhythm;state.rhythm++;solved=true;feedback='빈 소박이 돌아왔어요! 내가 채운 부분을 강조해 다시 들어보세요.';save();showRhythmAtSolved();activeAudio="rhythm-restored";await sound.rhythm(semachi,false,rhythmPuzzles[justSolvedRhythm].blanks);}break;}
-    case 'rhythm-next':sound.stop();activeAudio='';solved=false;feedback='';rhythmHint=0;rhythmHeard=false;if(state.rhythm===2)travel('hall');else{prepareBoard();showRhythm();}break;
+    case 'rhythm-hint':rhythmHint=Math.min(3,rhythmHint+1);showRhythm();if(rhythmHint===2){activeAudio='rhythm-reference';await sound.rhythm(semachi,false,rhythmPuzzles[rhythmIndex].blanks);}break;
+    case 'verify-rhythm':{const wrong=board.map((s,i)=>s!==semachi[i]?i+1:0).filter(Boolean);if(wrong.length){feedback=`${wrong.join('・')}번째 소박이 기준과 다르게 들려요. 그 구간의 ‘덩·쿵·덕·쉼’을 다시 비교해 보세요.`;showRhythm();}else{justSolvedRhythm=rhythmIndex;recordPuzzleCompletion(state,'rhythm',rhythmIndex);solved=true;feedback='빈 소박이 돌아왔어요! 내가 채운 부분을 강조해 다시 들어보세요.';save();showRhythmAtSolved();activeAudio="rhythm-restored";await sound.rhythm(semachi,false,rhythmPuzzles[justSolvedRhythm].blanks);}break;}
+    case 'rhythm-next':sound.stop();activeAudio='';solved=false;feedback='';rhythmHint=0;rhythmHeard=false;rhythmIndex++;if(rhythmIndex===rhythmPuzzles.length){if(replayingRhythm)showReplayMenu('장단 문제 2개를 다시 풀었어요.');else travel('hall');}else{prepareBoard();showRhythm();}break;
     case 'rhythm-review-listen':await sound.rhythm(semachi);break;
     case 'performance':await playWithButton('performance',()=>sound.performance());break;
     case 'finish':state.completed=true;save();sound.stop();showResults();break;
