@@ -60,7 +60,13 @@ test('shifted reference preserves all strokes and reconstructs with reverse rota
 });
 test('walls, exhibits and locked gates collide while open routes remain walkable',()=>{
  assert.equal(canOccupy(12,0,defaults),false);assert.equal(canOccupy(-4,0,defaults),false);assert.equal(canOccupy(-6,0,defaults),true);assert.equal(canOccupy(0,-4.5,defaults),false);
- assert.equal(canOccupy(-10.1,-7,defaults),false);assert.equal(canOccupy(0,-4.5,{instrument:6,rhythm:0}),true);assert.equal(canOccupy(6,0,{instrument:6,rhythm:0}),false);assert.equal(canOccupy(6,0,{instrument:6,rhythm:4}),true);
+ assert.equal(canOccupy(-15,-7,defaults),false);assert.equal(canOccupy(0,-4.5,{instrument:6,rhythm:0}),true);assert.equal(canOccupy(6,0,{instrument:6,rhythm:0}),false);assert.equal(canOccupy(6,0,{instrument:6,rhythm:4}),true);
+ for(const x of [-3,-2,-1,0,.6])assert.equal(canOccupy(x,-4.5,{instrument:6,rhythm:0}),true,'gallery doorway approach must stay clear');
+});
+test('expanded gallery has a continuous aisle and contains its new west wall',()=>{
+ for(let x=-16;x<=-3;x+=.2)assert.equal(canOccupy(x,-4.5,defaults),x>-15.22,'west case stays solid and the central aisle stays open');
+ assert.equal(canOccupy(-13,-2.8,defaults),true);assert.equal(canOccupy(-18,-4.5,defaults),false);assert.equal(canOccupy(-14,2,defaults),false);
+ const open={instrument:6,rhythm:4};assert.equal(canOccupy(6,-3.4,open),true);assert.equal(canOccupy(6.6,4,open),true);
 });
 test('every puzzle and stage instrument has a credited real recording',()=>{
  const manifest=JSON.parse(readFileSync('public/audio/manifest.json','utf8'));const ids=new Set(manifest.items.map((a:{id:string})=>a.id));

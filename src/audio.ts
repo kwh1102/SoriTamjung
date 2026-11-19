@@ -6,6 +6,15 @@ export class SoundEngine {
   nodes=new Set<AudioScheduledSourceNode>(); volume=.65; muted=false; current:{start:number;step:number;count:number;loop:boolean}|null=null;
   status='소리를 켜고 입장해 주세요'; ready=false; loadPromise:Promise<void>|null=null; unavailable:string[]=[];
   generation=0;
+  levelGains=new Map<string,number>();
+  cacheBuffer(id:string,buffer:AudioBuffer){
+    this.buffers.set(id,buffer);
+    const samples=buffer.getChannelData(0),count=Math.min(samples.length,Math.round(buffer.sampleRate*.4));let sum=0,peak=0;
+    for(let i=0;i<samples.length;i++){const value=samples[i];peak=Math.max(peak,Math.abs(value));if(i<count)sum+=value*value;}
+    const rms=Math.sqrt(sum/Math.max(1,count));
+    // Match the average level near each attack while preserving the original dynamics.
+    this.levelGains.set(id,rms>1e-5?Math.min(2.5,.14/rms,.95/Math.max(peak,1e-5)):1);
+  }
   async unlock() {
     if(!this.context){this.context=new AudioContext();this.master=this.context.createGain();this.master.connect(this.context.destination);this.setVolume(this.volume,this.muted);}
     if(this.context.state==='suspended')await this.context.resume();
@@ -19,7 +28,7 @@ export class SoundEngine {
       if(!response.ok)throw new Error('음원 목록 없음');
       const data=await response.json();this.assets=Array.isArray(data)?data:(data.items??data.assets);
       if(!Array.isArray(this.assets))throw new Error('음원 목록 형식 오류');
-      await Promise.all(this.assets.map(async a=>{try{const res=await fetch(`${import.meta.env.BASE_URL}${a.file.replace(/^\//,'')}`);if(!res.ok)throw new Error();this.buffers.set(a.id,await this.context!.decodeAudioData(await res.arrayBuffer()));}catch{this.unavailable.push(a.id);}}));
+      await Promise.all(this.assets.map(async a=>{try{const res=await fetch(`${import.meta.env.BASE_URL}${a.file.replace(/^\//,'')}`);if(!res.ok)throw new Error();this.cacheBuffer(a.id,await this.context!.decodeAudioData(await res.arrayBuffer()));}catch{this.unavailable.push(a.id);}}));
       this.ready=[...instruments.map(i=>i.id==='janggu'?'deong':i.id),'kung','ttak'].every(id=>this.buffers.has(id));
       this.status=this.ready?'실제 국악기 음원 준비 완료':'일부 음원을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침해 주세요.';
     }catch{this.status='음원을 불러오지 못했어요. 연결을 확인하고 새로고침해 주세요.';}
@@ -27,23 +36,28 @@ export class SoundEngine {
   setVolume(volume:number,muted:boolean){this.volume=volume;this.muted=muted;if(this.master&&this.context)this.master.gain.setTargetAtTime(muted?0:volume,this.context.currentTime,.02);}
   stop(){this.generation++;for(const node of this.nodes){try{node.stop();}catch{} node.disconnect();}this.nodes.clear();this.current=null;}
   sample(id:string,time:number,rate=1,gain=.65,duration?:number){
-    const buffer=this.buffers.get(id==='janggu'?'deong':id);if(!buffer||!this.context||!this.master)return;
+    const assetId=id==='janggu'?'deong':id,buffer=this.buffers.get(assetId);if(!buffer||!this.context||!this.master)return;
+    gain*=this.levelGains.get(assetId)??1;
     const src=this.context.createBufferSource();src.buffer=buffer;src.playbackRate.value=rate;
     const amp=this.context.createGain();const end=Math.min(duration??buffer.duration/rate,buffer.duration/rate);
-    amp.gain.setValueAtTime(0,time);amp.gain.linearRampToValueAtTime(gain,time+.012);amp.gain.setValueAtTime(gain,Math.max(time+.012,time+end-.06));amp.gain.linearRampToValueAtTime(0,time+end);
+    const percussive=['janggu','deong','kung','ttak','jing','kkwaenggwari'].includes(id),attack=percussive?.0015:.012,release=percussive?.025:.06;
+    amp.gain.setValueAtTime(0,time);amp.gain.linearRampToValueAtTime(gain,time+attack);amp.gain.setValueAtTime(gain,Math.max(time+attack,time+end-release));amp.gain.linearRampToValueAtTime(0,time+end);
     src.connect(amp);amp.connect(this.master);this.nodes.add(src);src.onended=()=>{this.nodes.delete(src);src.disconnect();amp.disconnect();};src.start(time);src.stop(time+end+.01);
   }
-  stroke(stroke:Stroke,time:number,gain=.8){if(stroke==='deong'){if(this.buffers.has('deong'))this.sample('deong',time,1,gain,.5);else{this.sample('kung',time,1,gain*.7,.5);this.sample('ttak',time,1,gain*.55,.35);}}else if(stroke!=='rest')this.sample(stroke,time,1,gain,.5);}
+  stroke(stroke:Stroke,time:number,gain=.8){if(stroke==='deong'){if(this.buffers.has('deong'))this.sample('deong',time,1,gain);else{this.sample('kung',time,1,gain*.7);this.sample('ttak',time,1,gain*.55);}}else if(stroke!=='rest')this.sample(stroke,time,1,gain);}
+  async compareStrokes(){const generation=++this.generation;await this.unlock();if(generation!==this.generation)return;this.stop();const start=this.context!.currentTime+.08;(['deong','kung','ttak'] as Stroke[]).forEach((s,i)=>this.stroke(s,start+i*1.5,.8));this.current={start,step:1.5,count:3,loop:false};}
   async solo(id:InstrumentId|Stroke){const generation=++this.generation;await this.unlock();if(generation!==this.generation)return;this.stop();const start=this.context!.currentTime+.04;if(['deong','kung','ttak','rest'].includes(id))this.stroke(id as Stroke,start);else this.sample(id,start,1,.8,2);this.current={start,step:.5,count:4,loop:false};}
   async ensemble(missing:InstrumentId|InstrumentId[]=[],only?:InstrumentId,band:InstrumentId[]=['gayageum','daegeum','haegeum'],variation=0){
     const generation=++this.generation;await this.unlock();if(generation!==this.generation)return;this.stop();const start=this.context!.currentTime+.08;
     const omit=Array.isArray(missing)?missing:[missing];const melodies=[[1,1.12246,1.33484,1.49831,1.33484,1.12246,1,1],[1,1.33484,1.12246,1,1.49831,1.33484,1.12246,1],[1,1,1.33484,1.12246,1.49831,1.33484,1.49831,1]];
     const notes=melodies[variation%melodies.length];const step=variation===5?.32:variation===1?.62:.48;
+    // Use the original band size even when voices are omitted: the remaining mix stays fixed.
+    const gain=.46/Math.sqrt(band.length);
     band.forEach((id,layer)=>{
       if(omit.includes(id)||only&&id!==only)return;
       const metal=id==='jing'||id==='kkwaenggwari',drum=id==='janggu';
-      notes.forEach((rate,i)=>{if(metal&&i%(id==='jing'?4:2)!==0)return;if(drum){this.stroke(i%3===0?'deong':i%2?'ttak':'kung',start+i*step,.34);return;}
-        const offset=layer%2===0?0:step*.08;this.sample(id,start+i*step+offset,metal?1:rate,metal?.24:.46/Math.sqrt(band.length),metal?1.5:step*.92);});
+      notes.forEach((rate,i)=>{if(metal&&i%(id==='jing'?4:2)!==0)return;if(drum){this.stroke(i%3===0?'deong':i%2?'ttak':'kung',start+i*step,gain);return;}
+        const offset=layer%2===0?0:step*.08;this.sample(id,start+i*step+offset,metal?1:rate,gain,metal?1.5:step*.92);});
     });this.current={start,step,count:notes.length+3,loop:false};
   }
   async restored(id:InstrumentId){

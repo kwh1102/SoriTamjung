@@ -1,5 +1,6 @@
 import {concertPuzzles,instrumentPuzzles,rhythmPuzzles} from './data';
 import type {ConcertPuzzle,InstrumentId,RoomId,Stroke} from './data';
+import {entrance,exhibitLayout} from './museum-layout';
 export const SAVE_KEY='sori-detective:v1';
 export interface Save {version:2;instrument:number;rhythm:number;concert:number;room:RoomId;volume:number;muted:boolean;speed:number;sensitivity:number;started:boolean;completed:boolean;}
 export const defaults:Save={version:2,instrument:0,rhythm:0,concert:0,room:'lobby',volume:.65,muted:false,speed:3,sensitivity:1,started:false,completed:false};
@@ -23,10 +24,11 @@ export function sameSelection(selected:InstrumentId[],answers:InstrumentId[]){re
 export function matchesConcert(p:ConcertPuzzle,band:string,rhythm:number,tradition:string){return band===p.answer&&rhythm===p.rhythm&&(!p.tradition||tradition===p.tradition);}
 export function rhythmErrors(board:(Stroke|null)[],pattern:Stroke[]){if(board.length!==pattern.length)return pattern.map((_,i)=>i);return pattern.flatMap((s,i)=>s!==board[i]?[i]:[]);}
 export function rotatePattern<T>(pattern:T[],offset:number):T[]{return pattern.map((_,i)=>pattern[(i+offset)%pattern.length]);}
+const exhibitObstacles=exhibitLayout.map(({x,z,facing,width,depth})=>{const c=Math.abs(Math.cos(facing)),s=Math.abs(Math.sin(facing));return [x,z,(width*c+depth*s)/2,(width*s+depth*c)/2];});
 export function canOccupy(x:number,z:number,s:Pick<Save,'instrument'|'rhythm'>){
- const r=.28;if(Math.abs(x)>11.7-r||Math.abs(z)>8.7-r)return false;
- if(Math.abs(x)<r+.12&&Math.abs(Math.abs(z)-4.5)>1.25-r)return false;if(Math.abs(z)<r+.12&&Math.abs(Math.abs(x)-6)>1.25-r)return false;
+ const r=.28;if(x<(z<0?-17.7:-11.7)+r||x>11.7-r||Math.abs(z)>8.7-r)return false;
+ if(Math.abs(x)<r+entrance.depth/2&&Math.abs(Math.abs(z)-4.5)>entrance.radius-r)return false;if(Math.abs(z)<r+entrance.depth/2&&Math.abs(Math.abs(x)-6)>entrance.radius-r)return false;
  if(x>-.28&&z<0&&s.instrument<instrumentPuzzles.length)return false;if(x>-.28&&z>=0&&s.rhythm<rhythmPuzzles.length)return false;
- const obstacles=[[-10.1,-7,1.1,.8],[-7.4,-7,1.1,.8],[-4.7,-7,1.1,.8],[-2,-7,1.1,.8],[-10.4,-3.8,.8,1.1],[-2,-3.8,.8,1.1],[-10.4,-1.3,.8,.8],[-2,-1.3,.8,.8],[8,-6,1.8,1.2],[4,-5.8,1.3,1],[-9,6,1.25,1.25],[7,6.6,3.3,1.5]];
+ const obstacles=[...exhibitObstacles,[8,-6,1.8,1.2],[4,-5.8,1.3,1],[-9,6,1.25,1.25],[7,6.6,3.3,1.5]];
  return !obstacles.some(([cx,cz,hx,hz])=>Math.abs(x-cx)<hx+r&&Math.abs(z-cz)<hz+r);
 }

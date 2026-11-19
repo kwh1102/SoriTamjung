@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {SoundEngine} from '../src/audio.ts';
-import {semachi} from '../src/data.ts';
+import {semachi,instrumentPuzzles} from '../src/data.ts';
 function harness(){
   const engine=new SoundEngine();const sources:{startTime:number;stops:number[];disconnected:boolean}[]=[];
   const gain={setValueAtTime(){},linearRampToValueAtTime(){},setTargetAtTime(){}};
@@ -46,6 +46,28 @@ test('removing the first voice never moves the remaining voices in time',async()
  for(const id of ['daegeum','haegeum'])assert.deepEqual(scheduled.filter(n=>n.id===id).map(n=>n.time),full.filter(n=>n.id===id).map(n=>n.time));
 });
 
+test('all six missing versions remove exactly the intended voices and keep every other note unchanged',async()=>{
+ const {engine}=harness();let scheduled:{id:string;time:number;rate:number;gain:number;duration:number|undefined}[]=[];
+ engine.sample=(id,time,rate=1,gain=.65,duration)=>{scheduled.push({id,time,rate,gain,duration});};
+ for(const [variation,p] of instrumentPuzzles.entries()){
+  scheduled=[];await engine.ensemble([],undefined,p.ensemble,variation);const full=scheduled.slice();
+  const lead=full.filter(n=>p.answers.includes(n.id as typeof p.answers[number]));
+  const backing=full.filter(n=>!p.answers.includes(n.id as typeof p.answers[number]));
+  assert.ok(lead.length>0);assert.equal(new Set(full.map(n=>n.gain)).size,1,'every voice gets the same mix level');
+  scheduled=[];await engine.ensemble(p.answers,undefined,p.ensemble,variation);assert.deepEqual(scheduled,backing);
+ }
+});
+
+test('source level matching brings quiet and loud recordings to the same RMS without changing their buffers',()=>{
+ const {engine}=harness();
+ for(const [id,amplitude] of [['quiet',.1],['loud',.4]] as const){
+  const samples=Float32Array.from({length:44100},(_,i)=>Math.sin(i*.1)*amplitude),before=samples.slice();
+  const buffer={sampleRate:44100,duration:1,getChannelData:()=>samples} as unknown as AudioBuffer;engine.cacheBuffer(id,buffer);
+  let sum=0;for(let i=0;i<17640;i++)sum+=(samples[i]*engine.levelGains.get(id)!)**2;
+  assert.ok(Math.abs(Math.sqrt(sum/17640)-.14)<1e-8);assert.deepEqual(samples,before);
+ }
+});
+
 test('concert accompaniment is audible only when the stage has a janggu',async()=>{
  const {engine}=harness();let strokes=0;engine.stroke=()=>{strokes++;};
  await engine.concert(['gayageum','geomungo'],0);assert.equal(strokes,0);
@@ -54,4 +76,10 @@ test('concert accompaniment is audible only when the stage has a janggu',async()
 test('variable-length patterns use their own step and loop boundaries',async()=>{
  const {engine,sources}=harness();await engine.rhythm(['deong','rest','kung','ttak','kung','rest','kung','ttak'],true,[],.19);
  assert.equal(sources.length,24);assert.ok(Math.abs(sources[6].startTime-(10.08+8*.19))<1e-9);assert.equal(engine.current!.count,32);
+});
+
+test('drum playback preserves the different original tails and comparison leaves a gap',async()=>{
+ const {engine,sources}=harness();engine.buffers.set('deong',{duration:1.3} as AudioBuffer);engine.buffers.set('kung',{duration:1.3} as AudioBuffer);engine.buffers.set('ttak',{duration:.8} as AudioBuffer);
+ await engine.compareStrokes();assert.deepEqual(sources.map(s=>s.startTime),[10.08,11.58,13.08]);
+ for(const [i,duration] of [1.3,1.3,.8].entries())assert.ok(Math.abs(sources[i].stops[0]-(sources[i].startTime+duration+.01))<1e-9);
 });
