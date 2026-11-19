@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import {Museum} from '../src/museum.ts';
+import {defaults} from '../src/state.ts';
 
 function cameraRig(){
  const m=Object.create(Museum.prototype) as Museum;
@@ -22,4 +23,20 @@ test('reopening during a return still restores the original walking pose',()=>{
  const m=cameraRig(),position=m.camera.position.clone();m.setInspecting(true);m.focus(new THREE.Vector3(-13,2.2,-4),new THREE.Vector3(-15,1.7,-7));m.time=.75;m.updateFocus();
  m.setInspecting(false);m.time+=.25;m.updateFocus();m.setInspecting(true);m.focus(new THREE.Vector3(-8,2.2,-4),new THREE.Vector3(-8,1.7,-7));m.time+=.75;m.updateFocus();
  m.setInspecting(false);m.setPaused(true);m.time+=.75;m.updateFocus();assert.ok(m.camera.position.distanceTo(position)<1e-9);assert.equal(m.inspectionPose,null);
+});
+
+test('portrait widens the default view while rotation and puzzle resizing preserve separate preferences',()=>{
+ const m=cameraRig();m.state={...defaults};const position=m.camera.position.clone(),orientation=m.camera.quaternion.clone();
+ let portrait=false;const previous=Object.getOwnPropertyDescriptor(globalThis,'window');
+ Object.defineProperty(globalThis,'window',{configurable:true,value:{matchMedia:()=>({matches:portrait})}});
+ try{
+  m.updateFieldOfView();assert.equal(m.camera.fov,55);
+  portrait=true;m.camera.aspect=390/844;m.updateFieldOfView();assert.equal(m.camera.fov,85);
+  m.camera.aspect=390/304;m.updateFieldOfView();assert.equal(m.camera.fov,85,'opening the puzzle must not select the landscape preference');
+  m.state.portraitFov=95;m.updateFieldOfView();assert.equal(m.camera.fov,95);
+  portrait=false;m.updateFieldOfView();assert.equal(m.camera.fov,55);
+  m.state.fov=65;m.updateFieldOfView();assert.equal(m.camera.fov,65);
+  portrait=true;m.updateFieldOfView();assert.equal(m.camera.fov,95);
+  assert.ok(m.camera.position.equals(position));assert.ok(m.camera.quaternion.equals(orientation));
+ }finally{if(previous)Object.defineProperty(globalThis,'window',previous);else Reflect.deleteProperty(globalThis,'window');}
 });

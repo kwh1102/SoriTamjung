@@ -2,12 +2,12 @@ import {concertPuzzles,instrumentPuzzles,rhythmPuzzles} from './data';
 import type {ConcertPuzzle,InstrumentId,RoomId,Stroke} from './data';
 import {entrance,exhibitLayout} from './museum-layout';
 export const SAVE_KEY='sori-detective:v1';
-export interface Save {version:2;instrument:number;rhythm:number;concert:number;room:RoomId;volume:number;muted:boolean;speed:number;sensitivity:number;started:boolean;completed:boolean;}
-export const defaults:Save={version:2,instrument:0,rhythm:0,concert:0,room:'lobby',volume:.65,muted:false,speed:3,sensitivity:1,started:false,completed:false};
+export interface Save {version:2;instrument:number;rhythm:number;concert:number;room:RoomId;volume:number;muted:boolean;speed:number;sensitivity:number;fov:number;portraitFov:number;started:boolean;completed:boolean;}
+export const defaults:Save={version:2,instrument:0,rhythm:0,concert:0,room:'lobby',volume:.65,muted:false,speed:3,sensitivity:1,fov:55,portraitFov:85,started:false,completed:false};
 export function sanitize(value:unknown):Save {
  const v=value&&typeof value==='object'?value as Partial<Omit<Save,'version'>>&{version?:number}:{};
  const number=(n:unknown,min:number,max:number,fallback:number)=>typeof n==='number'&&Number.isFinite(n)?Math.min(max,Math.max(min,n)):fallback;
- const s:Save={...defaults,instrument:Math.floor(number(v.instrument,0,instrumentPuzzles.length,0)),rhythm:Math.floor(number(v.rhythm,0,rhythmPuzzles.length,0)),concert:Math.floor(number(v.concert,0,concertPuzzles.length,0)),volume:number(v.volume,0,1,.65),speed:number(v.speed,1.5,5,3),sensitivity:number(v.sensitivity,.3,2.5,1),muted:v.muted===true,started:v.started===true,completed:v.completed===true};
+ const s:Save={...defaults,instrument:Math.floor(number(v.instrument,0,instrumentPuzzles.length,0)),rhythm:Math.floor(number(v.rhythm,0,rhythmPuzzles.length,0)),concert:Math.floor(number(v.concert,0,concertPuzzles.length,0)),volume:number(v.volume,0,1,.65),speed:number(v.speed,1.5,5,3),sensitivity:number(v.sensitivity,.3,2.5,1),fov:number(v.fov,45,100,defaults.fov),portraitFov:number(v.portraitFov,45,100,defaults.portraitFov),muted:v.muted===true,started:v.started===true,completed:v.completed===true};
  // The first three legacy restorations match the same instruments in v2.
  if(v.version!==2){s.instrument=Math.min(s.instrument,3);s.rhythm=0;s.concert=0;s.completed=false;}
  if(s.instrument<instrumentPuzzles.length)s.rhythm=0;if(s.rhythm<rhythmPuzzles.length)s.concert=0;

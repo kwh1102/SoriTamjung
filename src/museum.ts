@@ -6,6 +6,7 @@ import type {Save} from './state';
 import {concertPuzzles,instruments,instrumentPuzzles,rhythmPuzzles} from './data';
 import type {InstrumentId,RoomId,Stroke} from './data';
 import {entrance,exhibitLayout} from './museum-layout';
+import {isPortraitView} from './view';
 
 const colors={wood:0x593925,paper:0xc8c0ab,dark:0x202b29,gold:0xc2a16b,teal:0x73b6a2};
 interface Exhibit {id:InstrumentId;group:THREE.Group;ghost:THREE.Group;base:THREE.Mesh;position:THREE.Vector3;facing:number;light:THREE.PointLight;reveal:number;}
@@ -200,7 +201,8 @@ export class Museum {
   this.inspecting=value;this.setPaused(value);
  }
  updateFocus(){if(this.focusTween){const f=this.focusTween,t=Math.min(1,(this.time-f.start)/.75),smooth=t*t*(3-2*t);this.camera.position.lerpVectors(f.from,f.to,smooth);this.camera.quaternion.slerpQuaternions(f.fromQ,f.toQ,smooth);if(t===1){this.focusTween=null;const euler=new THREE.Euler().setFromQuaternion(this.camera.quaternion,'YXZ');this.yaw=euler.y;this.pitch=euler.x;if(f.returning){this.inspectionPose=null;this.clearInput();}}}}
- resize(){const {width,height}=this.host.getBoundingClientRect();if(!width||!height)return;this.camera.aspect=width/height;this.camera.updateProjectionMatrix();this.renderer.setSize(width,height,false);}
+ updateFieldOfView(){this.camera.fov=isPortraitView()?this.state.portraitFov:this.state.fov;this.camera.updateProjectionMatrix();}
+ resize(){const {width,height}=this.host.getBoundingClientRect();if(!width||!height)return;this.camera.aspect=width/height;this.updateFieldOfView();this.renderer.setSize(width,height,false);}
  enter(room:RoomId='lobby'){this.overview=false;this.inspecting=false;this.paused=false;this.goTo(room);}
  goTo(room:RoomId){const positions:Record<RoomId,[number,number]>={lobby:[-6,5.9],instruments:[-6,-2.5],rhythm:[6,-2.4],hall:[6,2.3]};const [x,z]=positions[room];this.camera.position.set(x,1.7,z);this.yaw=room==='hall'?Math.PI:0;this.pitch=-.03;this.camera.rotation.set(this.pitch,this.yaw,0,'YXZ');this.focusTween=null;this.inspectionPose=null;this.state.room=room;this.target=null;this.onRoom(room);this.clearInput();}
  clearInput(){this.keys.clear();this.joystick={x:0,y:0};this.drag=null;}

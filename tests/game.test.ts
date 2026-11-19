@@ -14,6 +14,12 @@ test('legacy saves preserve the first three matching restorations and settings',
  assert.equal(s.version,2);assert.equal(s.instrument,3);assert.equal(s.rhythm,0);assert.equal(s.concert,0);assert.equal(s.completed,false);assert.equal(s.volume,.4);assert.equal(s.started,true);assert.equal(s.room,'lobby');
  assert.deepEqual(restoredInstruments(s),['gayageum','daegeum','haegeum']);
 });
+
+test('view preferences migrate old saves and retain independent portrait and landscape values',()=>{
+ const old=sanitize({version:2,instrument:3,volume:.4});assert.equal(old.fov,55);assert.equal(old.portraitFov,85);assert.equal(old.instrument,3);
+ const saved=sanitize({...defaults,fov:62,portraitFov:92});assert.equal(saved.fov,62);assert.equal(saved.portraitFov,92);assert.deepEqual(sanitize(saved),saved);
+ const invalid=sanitize({...defaults,fov:NaN,portraitFov:999});assert.equal(invalid.fov,55);assert.equal(invalid.portraitFov,100);
+});
 test('all 13 restorations advance sequentially and open each physical gate',()=>{
  const s={...defaults};assert.equal(unlocked(s,'rhythm'),false);assert.equal(unlocked(s,'hall'),false);
  for(let i=0;i<instrumentPuzzles.length;i++){recordPuzzleCompletion(s,'instrument',i);assert.equal(s.instrument,i+1);}
