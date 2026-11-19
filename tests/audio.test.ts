@@ -7,7 +7,7 @@ function harness(){
   const gain={setValueAtTime(){},linearRampToValueAtTime(){},setTargetAtTime(){}};
   const context={currentTime:10,createGain:()=>({gain,connect(){},disconnect(){}}),createBufferSource:()=>{const record={startTime:-1,stops:[] as number[],disconnected:false};sources.push(record);return {buffer:null,playbackRate:{value:1},connect(){},disconnect(){record.disconnected=true;},start(time:number){record.startTime=time;},stop(time?:number){record.stops.push(time??-1);}};}};
   engine.context=context as unknown as AudioContext;engine.master=context.createGain() as unknown as GainNode;
-  for(const id of ['gayageum','daegeum','haegeum','deong','kung','ttak'])engine.buffers.set(id,{duration:2.4} as AudioBuffer);
+  for(const id of ['gayageum','daegeum','haegeum','geomungo','piri','ajaeng','jing','kkwaenggwari','deong','kung','ttak'])engine.buffers.set(id,{duration:2.4} as AudioBuffer);
   engine.unlock=async()=>{};engine.ready=true;return {engine,sources,context};
 }
 test('rhythm uses absolute AudioContext times across all four loop boundaries',async()=>{
@@ -29,4 +29,29 @@ test('closing while audio activation is pending prevents delayed sound',async()=
 test('incomplete ensemble schedules no notes for the missing instrument',async()=>{
   const {engine,sources}=harness();await engine.ensemble('daegeum');assert.equal(sources.length,16);
   await engine.ensemble();assert.equal(engine.nodes.size,24);assert.equal(sources.length,40);
+});
+
+test('two missing voices and other variations preserve the same timeline',async()=>{
+ const {engine}=harness();const scheduled:{id:string;time:number}[]=[];engine.sample=(id,time)=>{scheduled.push({id,time});};
+ const band=['piri','ajaeng','haegeum','gayageum','daegeum'] as const;
+ await engine.ensemble(['piri','ajaeng'],undefined,[...band],4);const partial=scheduled.slice();assert.equal(partial.length,24);assert.ok(partial.every(n=>n.id!=='piri'&&n.id!=='ajaeng'));
+ scheduled.length=0;await engine.ensemble([],undefined,[...band],4);assert.equal(scheduled.length,40);
+ // Compare timestamps for each remaining voice; removing a layer must not shift another.
+ for(const id of band.filter(id=>id!=='piri'&&id!=='ajaeng'))assert.deepEqual(partial.filter(n=>n.id===id).map(n=>n.time),scheduled.filter(n=>n.id===id).map(n=>n.time));
+});
+
+test('removing the first voice never moves the remaining voices in time',async()=>{
+ const {engine}=harness();const scheduled:{id:string;time:number}[]=[];engine.sample=(id,time)=>{scheduled.push({id,time});};
+ await engine.ensemble();const full=scheduled.slice();scheduled.length=0;await engine.ensemble('gayageum');
+ for(const id of ['daegeum','haegeum'])assert.deepEqual(scheduled.filter(n=>n.id===id).map(n=>n.time),full.filter(n=>n.id===id).map(n=>n.time));
+});
+
+test('concert accompaniment is audible only when the stage has a janggu',async()=>{
+ const {engine}=harness();let strokes=0;engine.stroke=()=>{strokes++;};
+ await engine.concert(['gayageum','geomungo'],0);assert.equal(strokes,0);
+ await engine.concert(['gayageum','janggu'],0);assert.equal(strokes,18);
+});
+test('variable-length patterns use their own step and loop boundaries',async()=>{
+ const {engine,sources}=harness();await engine.rhythm(['deong','rest','kung','ttak','kung','rest','kung','ttak'],true,[],.19);
+ assert.equal(sources.length,24);assert.ok(Math.abs(sources[6].startTime-(10.08+8*.19))<1e-9);assert.equal(engine.current!.count,32);
 });
